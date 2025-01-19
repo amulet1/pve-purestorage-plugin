@@ -159,6 +159,14 @@ sub prepare_api_params {
   return join( '&', @ands );
 }
 
+sub fix_snap_name {
+  my ($snap_name) = @_;
+
+  $snap_name =~ s/_/-/g;
+
+  return 'snap-' . $snap_name;
+}
+
 ### BLOCK: Local multipath => PVE::Storage::Custom::PureStoragePlugin::sub::s
 
 my $psfa_api = "2.26";
@@ -630,7 +638,7 @@ sub purestorage_snap_volume_create {
 
   my $params = {
     source_names => "$vgname/$volname",
-    suffix       => "snap-$snap_name"
+    suffix       => fix_snap_name($snap_name)
   };
 
   my $response = purestorage_api_request( $scfg, { type => 'volume-snapshots', method => 'POST', params => $params } );
@@ -662,7 +670,7 @@ sub purestorage_snap_volume_rollback {
     },
     body   => {
       source => {
-        name => "$vgname/$volname.snap-$snap_name"
+        name => "$vgname/$volname." . fix_snap_name($snap_name)
       }
     }
   };
@@ -686,10 +694,11 @@ sub purestorage_snap_volume_delete {
 
   my $vgname = $scfg->{ vgname } || die "Error :: Volume group name is not defined.\n";
 
+  my $params = { names => "$vgname/$volname." . fix_snap_name($snap_name) };
   my $action = {
     type   => 'volume-snapshots',
     method => 'PATCH',
-    params => { names => "$vgname/$volname.snap-$snap_name" },
+    params => $params,
     body   => { destroyed => \1 }
   };
   my $response = purestorage_api_request( $scfg, $action );
@@ -714,13 +723,13 @@ sub purestorage_snap_volume_delete {
 
   print "Info :: Volume \"$vgname/$volname\" snapshot \"$snap_name\" destroyed.\n";
 
+  #FIXME: According to API, replication_snapshot should be in query, not body
   $action = {
     type   => 'volume-snapshots',
     method => 'DELETE',
-    params => { names => "$vgname/$volname.snap-$snap_name" },
+    params => $params,
     body   => { replication_snapshot => \1 }
   };
-
   $response = purestorage_api_request( $scfg, $action );
   if ( $response->{ error } ) {
     $Data::Dumper::Indent = 0;

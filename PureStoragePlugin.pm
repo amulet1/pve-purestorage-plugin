@@ -159,6 +159,14 @@ sub prepare_api_params {
   return join( '&', @ands );
 }
 
+sub fix_snap_name {
+  my ($snap_name) = @_;
+
+  $snap_name =~ s/_/-/g;
+
+  return 'snap-' . $snap_name;
+}
+
 ### BLOCK: Local multipath => PVE::Storage::Custom::PureStoragePlugin::sub::s
 
 my $psfa_api = "2.26";
@@ -630,11 +638,10 @@ sub purestorage_snap_volume_create {
 
   my $params = {
     source_names => "$vgname/$volname",
-    suffix       => "snap-$snap_name"
+    suffix       => fix_snap_name($snap_name)
   };
 
   my $response = purestorage_api_request( $scfg, { type => 'volume-snapshots', method => 'POST', params => $params } );
-
   if ( $response->{ error } ) {
     die "Error :: PureStorage API :: Snapshot volume failed.\n"
       . "=> Trace:\n"
@@ -662,12 +669,12 @@ sub purestorage_snap_volume_rollback {
     },
     body   => {
       source => {
-        name => "$vgname/$volname.snap-$snap_name"
+        name => "$vgname/$volname." . fix_snap_name($snap_name)
       }
     }
   };
-  my $response = purestorage_api_request( $scfg, $action );
 
+  my $response = purestorage_api_request( $scfg, $action );
   if ( $response->{ error } ) {
     die "Error :: PureStorage API :: Restore volume snapshot failed.\n"
       . "=> Trace:\n"
@@ -686,12 +693,14 @@ sub purestorage_snap_volume_delete {
 
   my $vgname = $scfg->{ vgname } || die "Error :: Volume group name is not defined.\n";
 
+  my $params = { names => "$vgname/$volname." . fix_snap_name($snap_name) };
   my $action = {
     type   => 'volume-snapshots',
     method => 'PATCH',
-    params => { names => "$vgname/$volname.snap-$snap_name" },
+    params => $params,
     body   => { destroyed => \1 }
   };
+
   my $response = purestorage_api_request( $scfg, $action );
   if ( $response->{ error } ) {
     my @valid_errors =
@@ -714,10 +723,11 @@ sub purestorage_snap_volume_delete {
 
   print "Info :: Volume \"$vgname/$volname\" snapshot \"$snap_name\" destroyed.\n";
 
+  #FIXME: Pure FA API states that replication_snapsot is query (not body) parameter
   $action = {
     type   => 'volume-snapshots',
     method => 'DELETE',
-    params => { names => "$vgname/$volname.snap-$snap_name" },
+    params => $params,
     body   => { replication_snapshot => \1 }
   };
 
@@ -1101,15 +1111,15 @@ sub volume_has_feature {
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::volume_has_feature\n" if $DEBUG;
 
   my $features = {
-    copy     => { base    => 1, current => 1, snap => 1 },    # full clone is possible
-    clone    => { snap    => 1 },                             # linked clone is possible
-    snapshot => { current => 1 },                             # taking a snapshot is possible
-                                                              # template => { current => 1 }, # conversion to base image is possible
-                                                              # sparseinit => { base => 1, current => 1 }, # volume is sparsely initialized (thin provisioning)
-    rename   => { current => 1 },                             # renaming volumes is possible
+    copy       => { current => 1, snap => 1 },                  # full clone is possible
+    clone      => { snap    => 1 },                             # linked clone is possible
+    snapshot   => { current => 1 },                             # taking a snapshot is possible
+                                                                # template => { current => 1 }, # conversion to base image is possible
+    sparseinit => { current => 1 },                             # thin provisioning is supported
+    rename     => { current => 1 },                             # renaming volumes is possible
   };
   my ( $vtype, $name, $vmid, $basename, $basevmid, $isBase ) = $class->parse_volname( $volname );
-  my $key = undef;
+  my $key;
   if ( $snapname ) {
     $key = "snap";
   } else {

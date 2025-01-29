@@ -136,6 +136,7 @@ sub exec_command {
 
 sub prepare_api_params {
   my ( $parms ) = @_;
+  print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::prepare_api_params\n" if $DEBUG;
 
   return $parms unless ref( $parms ) eq 'HASH';
 
@@ -152,7 +153,7 @@ sub prepare_api_params {
         if ( $ref eq '' ) {
           $fvalue = [ split( ',', $fvalue ) ];
         } else {
-          die "Unsupported condition type: $ref" if $ref ne 'ARRAY';
+          die "Error :: Unsupported condition type: $ref" if $ref ne 'ARRAY';
         }
         $or     = $#$fvalue > 0;
         $fvalue = join( ' or ', map { "$fname='$_'" } @$fvalue );
@@ -184,8 +185,8 @@ sub purestorage_name_prefix {
     while ( my ( $key, $suffix ) = each( %parms ) ) {
       $value = $scfg->{ $key };
       if ( defined( $value ) ) {
-        die "Cannot have both \"$pkey\" and \"$key\" provided at the same time\n" if $pkey ne '';
-        die "Invalid \"$key\" parameter value \"$value\"\n"                       if $value !~ m/^\w([\w-]*\w)?$/;
+        die "Error :: Cannot have both \"$pkey\" and \"$key\" provided at the same time\n" if $pkey ne '';
+        die "Error :: Invalid \"$key\" parameter value \"$value\"\n"                       if $value !~ m/^\w([\w-]*\w)?$/;
         $prefix = $value . $suffix;
         $pkey   = $key;
       }
@@ -196,7 +197,7 @@ sub purestorage_name_prefix {
     $value = $scfg->{ $pkey };
     if ( defined( $value ) ) {
       $prefix .= $value;
-      die "Invalid \"$pkey\" parameter value \"$value\"\n" if $prefix !~ m/^\w([\w-]*\w)?((\/|::)(\w[\w-]*)?)?$/;
+      die "Error :: Invalid \"$pkey\" parameter value \"$value\"\n" if $prefix !~ m/^\w([\w-]*\w)?((\/|::)(\w[\w-]*)?)?$/;
     }
 
     $scfg->{ $ckey } = $prefix;
@@ -208,14 +209,20 @@ sub purestorage_name_prefix {
 sub purestorage_name {
   my ( $scfg, $volname, $snapname ) = @_;
 
-  $volname = length( $volname ) ? purestorage_name_prefix( $scfg ) . $volname : '';
+  my $name = length( $volname ) ? purestorage_name_prefix( $scfg ) . $volname : '';
   if ( length( $snapname ) ) {
-    $snapname =~ s/_/-/g;
-    $volname .= '.' if $volname ne '';
-    $volname .= 'snap-' . $snapname;
+    my $snap = $snapname;
+    $snap =~ s/^(veeam_)/veeam-/;    # s/_/-/g;
+    $snap = 'snap-' . $snap unless defined $1;
+    $name .= '.' if $name ne '';
+    $name .= $snap;
   }
 
-  return $volname;
+  print 'Debug :: purestorage_name ::',
+    ( defined( $volname ) ? ' name="' . $volname . '"' : '' ), ( defined( $snapname ) ? ' snap="' . $snapname . '"' : '' ), ' => "' . $name . '"', "\n"
+    if $DEBUG >= 2;
+
+  return $name;
 }
 
 ### BLOCK: Local multipath => PVE::Storage::Custom::PureStoragePlugin::sub::s
@@ -908,13 +915,12 @@ sub map_volume {
     print "Info :: Waiting (" . $iteration . "s) for map volume \"$volname\"...\n";
     $iteration++;
     if ( -e $path ) {
-      return 1;
+      return $path;
     }
     sleep $interval;
   }
 
-  warn "Warning :: Local path \"$path\" does not exist.\n";
-  return 0;
+  die "Error :: Local path \"$path\" does not exist.\n";
 }
 
 sub unmap_volume {

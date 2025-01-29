@@ -32,7 +32,7 @@ $Data::Dumper::Indent = 1;    # Outputs everything in one line
 $Data::Dumper::Useqq  = 1;    # Uses quotes for strings
 
 my $purestorage_wwn_prefix = "624a9370";
-my $default_hgsuffix = "";
+my $default_hgsuffix       = "";
 
 my $DEBUG = 0;
 
@@ -88,11 +88,11 @@ sub properties {
     },
     podname => {
       description => 'PureStorage pod name',
-      type => 'string'
+      type        => 'string'
     },
     vnprefix => {
       description => 'Prefix to add to volume name before sending it to PureStorage array',
-      type => 'string'
+      type        => 'string'
     },
     check_ssl => {
       description => "Verify the server's TLS certificate",
@@ -135,7 +135,7 @@ sub exec_command {
 }
 
 sub prepare_api_params {
-  my ($parms) = @_;
+  my ( $parms ) = @_;
 
   return $parms unless ref( $parms ) eq 'HASH';
 
@@ -154,7 +154,7 @@ sub prepare_api_params {
         } else {
           die "Unsupported condition type: $ref" if $ref ne 'ARRAY';
         }
-        $or = $#$fvalue > 0;
+        $or     = $#$fvalue > 0;
         $fvalue = join( ' or ', map { "$fname='$_'" } @$fvalue );
         $fvalue = '(' . $fvalue . ')' if $or;
         push @temp, $fvalue;
@@ -172,12 +172,12 @@ sub prepare_api_params {
 sub purestorage_name_prefix {
   my ( $scfg ) = @_;
 
-  my $ckey = '_vnprefix';
+  my $ckey   = '_vnprefix';
   my $prefix = $scfg->{ $ckey };
   if ( !defined( $prefix ) ) {
     my %parms = (
-      vgname   => '/',
-      podname  => '::'
+      vgname  => '/',
+      podname => '::'
     );
     my $value;
     my $pkey = '';
@@ -185,18 +185,18 @@ sub purestorage_name_prefix {
       $value = $scfg->{ $key };
       if ( defined( $value ) ) {
         die "Cannot have both \"$pkey\" and \"$key\" provided at the same time\n" if $pkey ne '';
-        die "Invalid \"$key\" parameter value \"$value\"\n" if $value !~ m/^\w([\w-]*\w)?$/;
+        die "Invalid \"$key\" parameter value \"$value\"\n"                       if $value !~ m/^\w([\w-]*\w)?$/;
         $prefix = $value . $suffix;
-        $pkey = $key;
+        $pkey   = $key;
       }
     }
-    $prefix = '' if $pkey eq '';  # allow no prefix
+    $prefix = '' if $pkey eq '';    # allow no prefix
 
-    $pkey = 'vnprefix';
+    $pkey  = 'vnprefix';
     $value = $scfg->{ $pkey };
     if ( defined( $value ) ) {
-       $prefix .= $value;
-       die "Invalid \"$pkey\" parameter value \"$value\"\n" if $prefix !~ m/^\w([\w-]*\w)?((\/|::)(\w[\w-]*)?)?$/;
+      $prefix .= $value;
+      die "Invalid \"$pkey\" parameter value \"$value\"\n" if $prefix !~ m/^\w([\w-]*\w)?((\/|::)(\w[\w-]*)?)?$/;
     }
 
     $scfg->{ $ckey } = $prefix;
@@ -208,7 +208,7 @@ sub purestorage_name_prefix {
 sub purestorage_name {
   my ( $scfg, $volname, $snapname ) = @_;
 
-  $volname = length( $volname) ? purestorage_name_prefix( $scfg ) . $volname : '';
+  $volname = length( $volname ) ? purestorage_name_prefix( $scfg ) . $volname : '';
   if ( length( $snapname ) ) {
     $snapname =~ s/_/-/g;
     $volname .= '.' if $volname ne '';
@@ -221,6 +221,7 @@ sub purestorage_name {
 ### BLOCK: Local multipath => PVE::Storage::Custom::PureStoragePlugin::sub::s
 
 my $psfa_api = "2.26";
+
 sub purestorage_api_request {
   my ( $scfg, $action ) = @_;
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::purestorage_api_request\n" if $DEBUG;
@@ -233,66 +234,87 @@ sub purestorage_api_request {
   my $params = prepare_api_params( $action->{ params } );
   $url .= "?$params" if length( $params );
 
-  my $headers = HTTP::Headers->new( 'Content-Type' => 'application/json' );
-
-  my $login = $type eq 'login';
-  if ( $login ) {
-    $headers->header( 'api-token' => $scfg->{ token } );
-  } else {
-    if ( $scfg->{ x_auth_token } ) {
-      print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::purestorage_get_auth_token::cached\n" if $DEBUG;
-    } else {
-      print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::purestorage_get_auth_token\n" if $DEBUG;
-      purestorage_api_request( $scfg, { name => 'Authentication', type => 'login', method => 'POST' } );
-    }
-    $headers->header( 'x-auth-token' => $scfg->{ x_auth_token } );
-  }
-  $headers->header( 'X-Request-ID' => $scfg->{ x_request_id } ) if $scfg->{ x_request_id };
-
   my $ua = LWP::UserAgent->new;
   $ua->ssl_opts(
     verify_hostname => 0,
     SSL_verify_mode => 0x00
   ) unless $scfg->{ check_ssl };
 
-  my $request      = HTTP::Request->new( $action->{ method }, $url, $headers, $action->{ body } ? encode_json( $action->{ body } ) : undef );
-  my $response     = $ua->request( $request );
+  my $body    = $action->{ body } ? encode_json( $action->{ body } ) : undef;
+  my $headers = HTTP::Headers->new( 'Content-Type' => 'application/json' );
+
+  my $token_status;
+  if ( $type eq 'login' ) {
+    $token_status = 0;    # login request
+    $headers->header( 'api-token' => $scfg->{ token } );
+  } elsif ( $scfg->{ x_auth_token } ) {
+    $token_status = 1;    # have cached token
+  } else {
+    $token_status = 2;    # need token
+  }
+
+  my $success;
+  my $response;
+  while ( 1 ) {
+    if ( $token_status > 0 ) {
+      if ( $token_status == 1 ) {
+        print "Debug :: Using existing session token\n" if $DEBUG;
+      } else {
+        print "Debug :: Requesting new session token\n" if $DEBUG;
+        purestorage_api_request( $scfg, { name => 'Authentication', type => 'login', method => 'POST' } );
+      }
+      $headers->header( 'x-auth-token' => $scfg->{ x_auth_token } );
+    }
+    $headers->header( 'X-Request-ID' => $scfg->{ x_request_id } ) if $scfg->{ x_request_id };
+
+    my $request = HTTP::Request->new( $action->{ method }, $url, $headers, $body );
+    $response = $ua->request( $request );
+
+    $success = $response->is_success;
+    if ( !$success && $token_status == 1 && $response->code == 401 ) {
+      print "Debug :: Session token expired\n";
+      $token_status = 2;
+      next;
+    }
+
+    last;
+  }
+
   my $content_type = $response->header( "Content-Type" );
-  my $content      = defined $content_type && $content_type =~ /application\/json/ && $response->content ne ''
+  my $content =
+    defined $content_type && $content_type =~ /application\/json/ && $response->content ne ''
     ? decode_json( $response->content )
     : $response->decoded_content;
 
   $content = {} if $content eq '';
 
-  my $action_name = $action->{ name } || "Action '$type' (method '" . $action->{ method } . "')";
-  my $success = $response->is_success;
   if ( $success ) {
-    if ($login) {
-      $headers = $response->headers;
-      $scfg->{ x_auth_token } = $headers->header( 'x-auth-token' ) || die "Header 'x-auth-token' is missing.";
+    if ( $token_status == 0 ) {
+      $headers                = $response->headers;
+      $scfg->{ x_auth_token } = $headers->header( 'x-auth-token' ) or die "Error :: Header 'x-auth-token' is missing.\n";
       $scfg->{ x_request_id } = $headers->header( 'x-request-id' );
     }
   } else {
     my $ignore_errors = $action->{ ignore };
     if ( defined( $ignore_errors ) ) {
-      $ignore_errors = [ $ignore_errors ] if ref( $ignore_errors ) eq '';
+      $ignore_errors = [$ignore_errors] if ref( $ignore_errors ) eq '';
       my $first = $content->{ errors }->[0]->{ message };
       $success = 1 if grep { $_ eq $first } @$ignore_errors;
     }
 
     if ( !$success ) {
-      my $message = substr( $action_name, 0, 1);
-      $message = $message eq uc( $message ) ? $action_name . ' failed' : 'Failed to ' . $action_name;
+      my $message = $action->{ name } || "Action '$type' (method '" . $action->{ method } . "')";
+      $message = substr( $message, 0, 1 ) eq uc( substr( $message, 0, 1 ) ) ? $message . ' failed' : 'Failed to ' . $message;
       die "Error :: PureStorage API :: $message.\n"
         . "=> Trace:\n"
-        . "==> Code: " . $response->code . "\n"
+        . "==> Code: "
+        . $response->code . "\n"
         . ( $content ? "==> Message: " . Dumper( $content ) : '' );
     }
   }
 
   return $content;
 }
-
 
 sub purestorage_list_volumes {
   my ( $class, $scfg, $vmid, $storeid, $destroyed ) = @_;
@@ -320,7 +342,7 @@ sub purestorage_get_volumes {
   my $response = purestorage_api_request( $scfg, $action );
 
   my $pref_len = length( purestorage_name_prefix( $scfg ) );
-  my @volumes = map {
+  my @volumes  = map {
     my $volname = substr( $_->{ name }, $pref_len );
 
     my ( undef, undef, $volvm ) = $class->parse_volname( $volname );
@@ -330,7 +352,7 @@ sub purestorage_get_volumes {
       name   => $volname,
       vmid   => $volvm,
       serial => $_->{ serial },
-      size   => $_->{ provisioned } || 0,
+      size   => $_->{ provisioned }           || 0,
       used   => $_->{ space }->{ total_used } || 0,
       ctime  => $ctime,
       volid  => $storeid ? "$storeid:$volname" : $volname,
@@ -365,6 +387,7 @@ sub purestorage_get_wwn {
 
   my $volume = $class->purestorage_get_existing_volume_info( $scfg, $volname );
   if ( $volume ) {
+
     # Construct the WWN path
     my $path = lc( "/dev/disk/by-id/wwn-0x" . $purestorage_wwn_prefix . $volume->{ serial } );
     my $wwn  = lc( "3" . $purestorage_wwn_prefix . $volume->{ serial } );
@@ -421,17 +444,17 @@ sub purestorage_volume_connection {
   my $method = $mode ? 'POST' : 'DELETE';
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::purestorage_volume_connection :: $method\n" if $DEBUG;
 
-  my $hname = PVE::INotify::nodename();
+  my $hname    = PVE::INotify::nodename();
   my $hgsuffix = $scfg->{ hgsuffix } // $default_hgsuffix;
   $hname .= "-" . $hgsuffix if $hgsuffix ne "";
 
   my $name;
   my $ignore;
   if ( $mode ) {
-    $name = 'create volume connection';
+    $name   = 'create volume connection';
     $ignore = 'Connection already exists.';
   } else {
-    $name = 'delete volume connection';
+    $name   = 'delete volume connection';
     $ignore = [ 'Volume has been destroyed.', 'Connection does not exist.' ];
   }
 
@@ -461,7 +484,7 @@ sub purestorage_create_volume {
     name   => 'create volume',
     type   => 'volumes',
     method => 'POST',
-    params => { names => purestorage_name( $scfg, $volname ) },
+    params => { names       => purestorage_name( $scfg, $volname ) },
     body   => { provisioned => $size }
   };
 
@@ -519,7 +542,9 @@ sub purestorage_get_device_size {
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::purestorage_get_device_size\n" if $DEBUG;
   my $size = 0;
 
-  exec_command( [ $cmd->{ blockdev }, '--getsize64', $path ], 1,
+  exec_command(
+    [ $cmd->{ blockdev }, '--getsize64', $path ],
+    1,
     outfunc => sub {
       $size = $_[0];
       chomp $size;
@@ -538,7 +563,7 @@ sub purestorage_resize_volume {
     name   => 'resize volume',
     type   => 'volumes',
     method => 'PATCH',
-    params => { names => purestorage_name( $scfg, $volname ) },
+    params => { names       => purestorage_name( $scfg, $volname ) },
     body   => { provisioned => $size }
   };
 
@@ -548,7 +573,7 @@ sub purestorage_resize_volume {
 
   my ( $path, $wwid ) = $class->purestorage_get_wwn( $scfg, $volname );
 
-  exec_command( [ $cmd->{ iscsiadm },  '--mode', 'node', '--rescan' ], 1);
+  exec_command( [ $cmd->{ iscsiadm }, '--mode', 'node', '--rescan' ], 1 );
 
   # FIXME: wwid is probably ignored
   exec_command( [ $cmd->{ multipath }, '-r', $wwid ], 1 );
@@ -586,7 +611,7 @@ sub purestorage_rename_volume {
     type   => 'volumes',
     method => 'PATCH',
     params => { names => purestorage_name( $scfg, $source_volname ) },
-    body   => { name => purestorage_name( $scfg, $target_volname ) }
+    body   => { name  => purestorage_name( $scfg, $target_volname ) }
   };
 
   purestorage_api_request( $scfg, $action );
@@ -656,10 +681,8 @@ sub purestorage_snap_volume_delete {
     name   => 'destroy volume snapshot',
     type   => 'volume-snapshots',
     method => 'PATCH',
-    ignore => [
-      'Volume snapshot has been destroyed. It can be recovered by purevol recover and eradicated by purevol eradicate.',
-      'No such volume or snapshot.'
-    ],
+    ignore =>
+      [ 'Volume snapshot has been destroyed. It can be recovered by purevol recover and eradicated by purevol eradicate.', 'No such volume or snapshot.' ],
     params => $params,
     body   => { destroyed => \1 }
   };
@@ -740,8 +763,8 @@ sub find_free_diskname {
   my ( $class, $storeid, $scfg, $vmid, $fmt, $add_fmt_suffix ) = @_;
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::find_free_diskname\n" if $DEBUG;
 
-  my $volumes     = $class->purestorage_list_volumes( $scfg, $vmid, $storeid );
-  my @disk_list   = map { $_->{ name } } @$volumes;
+  my $volumes   = $class->purestorage_list_volumes( $scfg, $vmid, $storeid );
+  my @disk_list = map { $_->{ name } } @$volumes;
 
   return PVE::Storage::Plugin::get_next_vm_diskname( \@disk_list, $storeid, $vmid, undef, $scfg );
 }
@@ -761,7 +784,7 @@ sub alloc_image {
   }
 
   # Check size (must be between 1MB and 4PB)
-  if ($size < 1024) {
+  if ( $size < 1024 ) {
     print "Info :: Size is too small ($size kb), adjusting to 1024 kb\n";
     $size = 1024;
   }
@@ -816,6 +839,7 @@ sub status {
     # Get storage capacity and used space from the response
     $cache->{ total } = $response->{ items }->[0]->{ capacity };
     $cache->{ used }  = $response->{ items }->[0]->{ space }->{ total_physical };
+
     # $cache->{ used } = $response->{ items }->[0]->{ space }->{ total_used }; # Do not know what is correct
 
     $cache->{ last_update } = $current_time;
@@ -854,7 +878,7 @@ sub volume_size_info {
   my ( $class, $scfg, $storeid, $volname, $timeout ) = @_;
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::volume_size_info\n" if $DEBUG;
 
-  my $volume = $class->purestorage_get_existing_volume_info( $scfg, $volname);
+  my $volume = $class->purestorage_get_existing_volume_info( $scfg, $volname );
 
   #TODO: Consider moving this inside of purestorage_get_existing_volume_info()
   die "Error :: PureStorage API :: No volume data found for \"$volname\".\n" unless $volume;
@@ -873,7 +897,7 @@ sub map_volume {
 
   exec_command( [ $cmd->{ multipath }, '-a', $wwid ], 1 );
 
-  exec_command( [ $cmd->{ iscsiadm },  '--mode', 'session', '--rescan' ], 1 );
+  exec_command( [ $cmd->{ iscsiadm }, '--mode', 'session', '--rescan' ], 1 );
 
   # Wait for the device to apear
   my $iteration    = 0;
@@ -910,7 +934,7 @@ sub unmap_volume {
     exec_command( [ $cmd->{ blockdev }, '--flushbufs', $path ] );
 
     my $device_name = basename( $device_path );
-    my $slaves_path     = "/sys/block/$device_name/slaves";
+    my $slaves_path = "/sys/block/$device_name/slaves";
 
     my @slaves = ();
     if ( -d $slaves_path ) {
@@ -990,6 +1014,7 @@ sub rename_volume {
   die "Error :: not implemented in storage plugin \"$class\".\n" if $class->can( 'api' ) && $class->api() < 10;
 
   if ( length( $target_volname ) ) {
+
     # See RBDPlugin.pm (note, currently PVE does not supply $target_volname parameter)
     my $volume = $class->purestorage_get_volume_info( $scfg, $target_volname, $storeid );
     die "target volume '$target_volname' already exists\n" if $volume;
@@ -1045,12 +1070,12 @@ sub volume_has_feature {
   print "Debug :: PVE::Storage::Custom::PureStoragePlugin::sub::volume_has_feature\n" if $DEBUG;
 
   my $features = {
-    copy       => { current => 1, snap => 1 },                  # full clone is possible
-    clone      => { current => 1, snap => 1 },                  # linked clone is possible
-    snapshot   => { current => 1 },                             # taking a snapshot is possible
-                                                                # template => { current => 1 }, # conversion to base image is possible
-    sparseinit => { current => 1 },                             # thin provisioning is supported
-    rename     => { current => 1 },                             # renaming volumes is possible
+    copy       => { current => 1, snap => 1 },    # full clone is possible
+    clone      => { current => 1, snap => 1 },    # linked clone is possible
+    snapshot   => { current => 1 },               # taking a snapshot is possible
+                                                  # template => { current => 1 }, # conversion to base image is possible
+    sparseinit => { current => 1 },               # thin provisioning is supported
+    rename     => { current => 1 },               # renaming volumes is possible
   };
   my ( $vtype, $name, $vmid, $basename, $basevmid, $isBase ) = $class->parse_volname( $volname );
   my $key;
